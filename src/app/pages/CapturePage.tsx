@@ -220,60 +220,59 @@ export function CapturePage() {
   };
 
   // ── Submit photo ───────────────────────────────────────────────────────────
-  const submitPhoto = async () => {
-    if (!capturedPhoto || !cratePrefix || !crateSuffix) {
-      setSubmitError("Missing crate number or photo."); return;
-    }
-    setUploading(true); setSubmitError("");
+const submitPhoto = async () => {
+  if (!capturedPhoto || !cratePrefix || !crateSuffix) {
+    setSubmitError("Missing crate number or photo."); return;
+  }
+  if (!oneDrive.isConfigured || !oneDrive.isConnected) {
+    setSubmitError("Please connect OneDrive first."); return;
+  }
 
-    const fullCrateName = `${cratePrefix}_${crateType}_${crateSuffix}`;
-    const ts    = capturedAt || new Date();
-    const date  = ts.toISOString().split("T")[0];
-    const tStr  = ts.toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-    const fname = `${fullCrateName}_${tStr}.jpg`;
+  setUploading(true); setSubmitError("");
 
-    let odItemId: string | undefined;
-    let odWebUrl: string | undefined;
-    let storageType: "onedrive" | "supabase" = "supabase";
+  const fullCrateName = `${cratePrefix}_${crateType}_${crateSuffix}`;
+  const ts    = capturedAt || new Date();
+  const date  = ts.toISOString().split("T")[0];
+  const tStr  = ts.toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+  const fname = `${fullCrateName}_${tStr}.jpg`;
 
-    // Try OneDrive first
-    if (oneDrive.isConfigured && oneDrive.isConnected) {
-      try {
-        setUploadStep("Uploading to OneDrive...");
-        const res = await oneDrive.uploadPhoto(capturedPhoto, storeName, fname, date);
-        odItemId = res.itemId; odWebUrl = res.webUrl;
-        storageType = "onedrive";
-      } catch (e: any) {
-        setSubmitError(`OneDrive failed: ${e.message}. Saved to server instead.`);
-        storageType = "supabase";
-      }
-    }
+  try {
+    setUploadStep("Uploading to OneDrive...");
+    const res = await oneDrive.uploadPhoto(capturedPhoto, storeName, fname, date);
 
-    try {
-      setUploadStep(storageType === "onedrive" ? "Saving record..." : "Uploading photo...");
-      await apiJson("/photos/upload", {
-        method: "POST",
-        body: JSON.stringify({
-          storeName, cratePrefix: cratePrefix.trim(), crateType,
-          crateSuffix: crateSuffix.trim(), photoType: "capture",
-          timestamp: ts.toISOString(), fileName: fname,
-          photoData:       storageType === "supabase" ? capturedPhoto : undefined,
-          oneDriveItemId:  storageType === "onedrive" ? odItemId : undefined,
-          oneDriveWebUrl:  storageType === "onedrive" ? odWebUrl  : undefined,
-          storageType,
-        }),
-      }, token);
+    // Save metadata locally so History tab works without a backend
+    const record: Photo = {
+      id: res.itemId,
+      storeName,
+      username: user?.username || "",
+      displayName: user?.displayName || user?.username || "",
+      fullCrateName,
+      crateType,
+      photoType: "capture",
+      date,
+      timestamp: ts.toISOString(),
+      fileName: fname,
+      signedUrl: null,
+      viewUrl: null,
+      storageType: "onedrive",
+      oneDriveWebUrl: res.webUrl,
+      oneDriveItemId: res.itemId,
+    };
+    const existing: Photo[] = JSON.parse(localStorage.getItem("rc_photos") || "[]");
+    existing.unshift(record);
+    localStorage.setItem("rc_photos", JSON.stringify(existing.slice(0, 500))); // cap to last 500
 
-      setCapturedPhoto(null); setCapturedAt(null); setCrateSuffix("");
-      setSuccess(true); setSessionCount(c => c + 1);
-      setTimeout(() => setSuccess(false), 3500);
-      await startCamera();
-    } catch (e: any) {
-      setSubmitError(`Save failed: ${e.message}`);
-    } finally {
-      setUploading(false); setUploadStep("");
-    }
-  };
+    setCapturedPhoto(null); setCapturedAt(null); setCrateSuffix("");
+    setSuccess(true); setSessionCount(c => c + 1);
+    setTimeout(() => setSuccess(false), 3500);
+    await startCamera();
+  } catch (e: any) {
+    setSubmitError(`OneDrive upload failed: ${e.message}`);
+  } finally {
+    setUploading(false); setUploadStep("");
+  }
+};
+
 
   const loadHistory = useCallback(async () => {
     if (!token) return;
